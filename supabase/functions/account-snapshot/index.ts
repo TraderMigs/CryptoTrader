@@ -1,10 +1,63 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import * as jose from "https://deno.land/x/jose@v4.15.4/index.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
+function toBase64url(bytes: Uint8Array): string {
+  let b64 = "";
+  for (let i = 0; i < bytes.length; i++) {
+    b64 += String.fromCharCode(bytes[i]);
+  }
+  return btoa(b64).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+}
+
+function extractRawPrivateKey(pem: string): Uint8Array {
+  const b64 = pem
+    .replace(/-----BEGIN EC PRIVATE KEY-----/, "")
+    .replace(/-----END EC PRIVATE KEY-----/, "")
+    .replace(/-----BEGIN PRIVATE KEY-----/, "")
+    .replace(/-----END PRIVATE KEY-----/, "")
+    .replace(/\s+/g, "");
+  const der = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+
+  if (pem.includes("EC PRIVATE KEY")) {
+    let i = 0;
+    i++;
+    if (der[i] & 0x80) {
+      i += (der[i] & 0x7f) + 1;
+    } else {
+      i++;
+    }
+    i += 3;
+    i += 2;
+    return der.slice(i, i + 32);
+  } else {
+    for (let i = 0; i < der.length - 34; i++) {
+      if (der[i] === 0x04 && der[i + 1] === 0x20) {
+        return der.slice(i + 2, i + 34);
+      }
+    }
+    throw new Error("Cannot find private key bytes in PEM");
+  }
+}
+
+function wrapInPkcs8(rawKey: Uint8Array): ArrayBuffer {
+  const pkcs8 = new Uint8Array([
+    0x30, 0x41,
+    0x02, 0x01, 0x00,
+    0x30, 0x13,
+    0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01,
+    0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07,
+    0x04, 0x27,
+    0x30, 0x25,
+    0x02, 0x01, 0x01,
+    0x04, 0x20,
+    ...rawKey,
+  ]);
+  return pkcs8.buffer;
+}
 
 async function buildCoinbaseJWT(method: string, path: string): Promise<string> {
   const keyName = Deno.env.get("COINBASE_API_KEY_NAME");
@@ -14,26 +67,46 @@ async function buildCoinbaseJWT(method: string, path: string): Promise<string> {
     throw new Error("Missing COINBASE_API_KEY_NAME or COINBASE_PRIVATE_KEY");
   }
 
-  const uri = `${method} api.coinbase.com${path}`;
+  const rawKey = extractRawPrivateKey(privateKeyPem);
+  const pkcs8 = wrapInPkcs8(rawKey);
+
+  const cryptoKey = await crypto.subtle.importKey(
+    "pkcs8",
+    pkcs8,
+    { name: "ECDSA", namedCurve: "P-256" },
+    false,
+    ["sign"]
+  );
+
   const now = Math.floor(Date.now() / 1000);
+  const uri = `${method} api.coinbase.com${path}`;
 
-  const privateKey = await jose.importPKCS8(privateKeyPem, "ES256");
+  const headerStr = JSON.stringify({
+    alg: "ES256",
+    kid: keyName,
+    nonce: crypto.randomUUID().replace(/-/g, ""),
+  });
 
-  const jwt = await new jose.SignJWT({
+  const payloadStr = JSON.stringify({
     iss: "cdp",
     nbf: now,
     exp: now + 120,
     sub: keyName,
     uri,
-  })
-    .setProtectedHeader({
-      alg: "ES256",
-      kid: keyName,
-      nonce: crypto.randomUUID().replace(/-/g, ""),
-    })
-    .sign(privateKey);
+  });
 
-  return jwt;
+  const enc = new TextEncoder();
+  const h = toBase64url(enc.encode(headerStr));
+  const p = toBase64url(enc.encode(payloadStr));
+  const sigInput = `${h}.${p}`;
+
+  const sig = await crypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" },
+    cryptoKey,
+    enc.encode(sigInput)
+  );
+
+  return `${sigInput}.${toBase64url(new Uint8Array(sig))}`;
 }
 
 Deno.serve(async (req) => {
@@ -47,36 +120,40 @@ Deno.serve(async (req) => {
   );
 
   try {
-    // Step 1: Fetch accounts from Coinbase
     const jwt = await buildCoinbaseJWT("GET", "/api/v3/brokerage/accounts");
 
-    const response = await fetch("https://api.coinbase.com/api/v3/brokerage/accounts", {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${jwt}`,
-        "Content-Type": "application/json",
-      },
-    });
+    const response = await fetch(
+      "https://api.coinbase.com/api/v3/brokerage/accounts",
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${jwt}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
 
     if (!response.ok) {
-      throw new Error(`Coinbase API error ${response.status}: ${await response.text()}`);
+      throw new Error(
+        `Coinbase API error ${response.status}: ${await response.text()}`
+      );
     }
 
     const data = await response.json();
     const accounts = data.accounts || [];
 
-    // Step 2: Calculate total equity across all accounts
     let totalEquity = 0;
     for (const account of accounts) {
-      const value = parseFloat(account.available_balance?.value || "0");
-      totalEquity += value;
+      totalEquity += parseFloat(account.available_balance?.value || "0");
     }
 
-    // USD cash available
-    const usdAccount = accounts.find((a: { currency: string }) => a.currency === "USD");
-    const availableCash = parseFloat(usdAccount?.available_balance?.value || "0");
+    const usdAccount = accounts.find(
+      (a: { currency: string }) => a.currency === "USD"
+    );
+    const availableCash = parseFloat(
+      usdAccount?.available_balance?.value || "0"
+    );
 
-    // Step 3: Get starting balance from bot_config context (first snapshot ever)
     const { data: firstSnapshot } = await supabase
       .from("account_snapshots")
       .select("starting_balance")
@@ -84,10 +161,9 @@ Deno.serve(async (req) => {
       .limit(1)
       .single();
 
-    const startingBalance = firstSnapshot?.starting_balance ?? 100.00;
+    const startingBalance = firstSnapshot?.starting_balance ?? 100.0;
     const realizedPnl = totalEquity - startingBalance;
 
-    // Step 4: Write snapshot
     await supabase.from("account_snapshots").insert({
       snapshot_time: new Date().toISOString(),
       starting_balance: startingBalance,
@@ -98,17 +174,17 @@ Deno.serve(async (req) => {
       equity: totalEquity,
     });
 
-    // Step 5: Update public_stats_cache balance fields
     const { data: statsRow } = await supabase
       .from("public_stats_cache")
-      .select("id, total_trades, wins, losses, win_rate")
+      .select("id")
       .limit(1)
       .single();
 
     if (statsRow) {
-      const pnlPct = startingBalance > 0
-        ? ((totalEquity - startingBalance) / startingBalance) * 100
-        : 0;
+      const pnlPct =
+        startingBalance > 0
+          ? ((totalEquity - startingBalance) / startingBalance) * 100
+          : 0;
 
       await supabase
         .from("public_stats_cache")
@@ -122,19 +198,25 @@ Deno.serve(async (req) => {
         .eq("id", statsRow.id);
     }
 
-    // Step 6: Update system health
-    await supabase
+    const { data: healthRow } = await supabase
       .from("system_health")
-      .update({
-        exchange_api_ok: true,
-        worker_online: true,
-        db_ok: true,
-        checked_at: new Date().toISOString(),
-        latest_error: null,
-      })
-      .eq("id", (await supabase.from("system_health").select("id").limit(1).single()).data?.id);
+      .select("id")
+      .limit(1)
+      .single();
 
-    // Step 7: Audit log
+    if (healthRow) {
+      await supabase
+        .from("system_health")
+        .update({
+          exchange_api_ok: true,
+          worker_online: true,
+          db_ok: true,
+          checked_at: new Date().toISOString(),
+          latest_error: null,
+        })
+        .eq("id", healthRow.id);
+    }
+
     await supabase.from("audit_logs").insert({
       source: "account-snapshot",
       event_type: "snapshot_written",
@@ -169,14 +251,22 @@ Deno.serve(async (req) => {
       payload_json: { error: message },
     });
 
-    await supabase
+    const { data: healthRow } = await supabase
       .from("system_health")
-      .update({
-        exchange_api_ok: false,
-        latest_error: message,
-        checked_at: new Date().toISOString(),
-      })
-      .eq("id", (await supabase.from("system_health").select("id").limit(1).single()).data?.id);
+      .select("id")
+      .limit(1)
+      .single();
+
+    if (healthRow) {
+      await supabase
+        .from("system_health")
+        .update({
+          exchange_api_ok: false,
+          latest_error: message,
+          checked_at: new Date().toISOString(),
+        })
+        .eq("id", healthRow.id);
+    }
 
     return new Response(
       JSON.stringify({ success: false, error: message }),
