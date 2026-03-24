@@ -44,7 +44,7 @@ export default function BrokerCard({ brokerName, isLive }: BrokerCardProps) {
           All trades executed programmatically. Zero manual intervention.
         </p>
         <a
-          href="https://coinbase.com/join"
+          href="https://coinbase.com/join/RZRZ4JC?src=referral-link"
           target="_blank"
           rel="noopener noreferrer"
           className="w-full text-center py-3 px-4 rounded-xl font-semibold text-sm transition-all duration-200"
