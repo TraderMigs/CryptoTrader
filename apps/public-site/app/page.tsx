@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import Image from "next/image";
 import BrokerCard from "@/components/BrokerCard";
 import CapitalCard from "@/components/CapitalCard";
 import PerformanceCard from "@/components/PerformanceCard";
@@ -32,8 +33,6 @@ async function getTrades() {
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     );
-
-    // Fetch from positions table - contains all trade data
     const { data, error } = await supabase
       .from("positions")
       .select(
@@ -74,8 +73,8 @@ export default async function HomePage() {
     updated_at: new Date().toISOString(),
     broker_name: "Coinbase Advanced",
     is_live: false,
-    starting_amount: 100,
-    current_amount: 100,
+    starting_amount: 50.01,
+    current_amount: 50.01,
     total_trades: 0,
     wins: 0,
     losses: 0,
@@ -99,23 +98,22 @@ export default async function HomePage() {
         }}
       />
 
-      {/* Header */}
+      {/* Header — logo replaces CT square + text */}
       <header
-        className="relative z-10 w-full px-6 py-6 flex items-center justify-between"
+        className="relative z-10 w-full px-6 py-4 flex items-center justify-between"
         style={{ borderBottom: "1px solid #1e1e2e" }}
       >
         <div className="flex items-center gap-3">
-          <div
-            className="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm"
-            style={{
-              background: "linear-gradient(135deg, #00ff88, #00cc6a)",
-              color: "#0d0d0f",
-            }}
-          >
-            CT
-          </div>
-          <span className="font-bold text-textPrimary tracking-tight">
-            CryptoTrader
+          <Image
+            src="/logo.png"
+            alt="TraderMigs"
+            width={44}
+            height={44}
+            className="rounded-xl"
+            style={{ objectFit: "contain" }}
+          />
+          <span className="font-bold text-textPrimary tracking-tight text-lg">
+            TraderMigs
           </span>
         </div>
         <div className="flex items-center gap-2">
@@ -132,8 +130,22 @@ export default async function HomePage() {
         </div>
       </header>
 
-      {/* Hero */}
-      <div className="relative z-10 px-6 pt-12 pb-8 text-center animate-fadeIn">
+      {/* Hero — logo + title */}
+      <div className="relative z-10 px-6 pt-10 pb-8 text-center animate-fadeIn">
+        {/* Logo hero image */}
+        <div className="flex justify-center mb-6">
+          <Image
+            src="/logo.png"
+            alt="TraderMigs Bot"
+            width={140}
+            height={140}
+            className="rounded-2xl"
+            style={{
+              objectFit: "contain",
+              filter: "drop-shadow(0 0 24px rgba(0,255,136,0.25))",
+            }}
+          />
+        </div>
         <p className="section-label mb-3">Live Performance Dashboard</p>
         <h1
           className="text-3xl sm:text-4xl font-bold text-textPrimary mb-3"
@@ -167,7 +179,7 @@ export default async function HomePage() {
         </div>
       </div>
 
-      {/* Trade History card — full width below */}
+      {/* Trade History */}
       <div className="relative z-10 px-4 sm:px-6 pb-12">
         <div className="max-w-5xl mx-auto">
           <TradeHistory trades={trades} />
