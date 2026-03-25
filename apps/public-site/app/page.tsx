@@ -98,24 +98,18 @@ export default async function HomePage() {
         }}
       />
 
-      {/* Header — logo replaces CT square + text */}
+      {/* Header — logo only, no text */}
       <header
         className="relative z-10 w-full px-6 py-4 flex items-center justify-between"
         style={{ borderBottom: "1px solid #1e1e2e" }}
       >
-        <div className="flex items-center gap-3">
-          <Image
-            src="/logo.png"
-            alt="TraderMigs"
-            width={44}
-            height={44}
-            className="rounded-xl"
-            style={{ objectFit: "contain" }}
-          />
-          <span className="font-bold text-textPrimary tracking-tight text-lg">
-            TraderMigs
-          </span>
-        </div>
+        <Image
+          src="/logo.png"
+          alt="TraderMigs"
+          width={48}
+          height={48}
+          style={{ objectFit: "contain" }}
+        />
         <div className="flex items-center gap-2">
           {s.is_live ? (
             <>
@@ -130,19 +124,17 @@ export default async function HomePage() {
         </div>
       </header>
 
-      {/* Hero — logo + title */}
+      {/* Hero — logo image + title, no text logo below */}
       <div className="relative z-10 px-6 pt-10 pb-8 text-center animate-fadeIn">
-        {/* Logo hero image */}
         <div className="flex justify-center mb-6">
           <Image
             src="/logo.png"
             alt="TraderMigs Bot"
-            width={140}
-            height={140}
-            className="rounded-2xl"
+            width={160}
+            height={160}
             style={{
               objectFit: "contain",
-              filter: "drop-shadow(0 0 24px rgba(0,255,136,0.25))",
+              filter: "drop-shadow(0 0 28px rgba(0,255,136,0.3))",
             }}
           />
         </div>
