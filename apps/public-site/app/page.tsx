@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import BrokerCard from "@/components/BrokerCard";
 import CapitalCard from "@/components/CapitalCard";
 import PerformanceCard from "@/components/PerformanceCard";
+import TradeHistory from "@/components/TradeHistory";
 import type { PublicStats } from "@/lib/supabase";
 
 export const revalidate = 60;
@@ -18,7 +19,6 @@ async function getStats(): Promise<PublicStats | null> {
       .order("updated_at", { ascending: false })
       .limit(1)
       .single();
-
     if (error) return null;
     return data as PublicStats;
   } catch {
@@ -26,8 +26,48 @@ async function getStats(): Promise<PublicStats | null> {
   }
 }
 
+async function getTrades() {
+  try {
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+
+    // Fetch from positions table - contains all trade data
+    const { data, error } = await supabase
+      .from("positions")
+      .select(
+        "id, symbol, state, entry_time, entry_price, exit_time, exit_price, size, realized_pnl"
+      )
+      .neq("state", "flat")
+      .order("entry_time", { ascending: false })
+      .limit(50);
+
+    if (error || !data) return [];
+
+    return data.map((p) => ({
+      id: p.id,
+      symbol: p.symbol,
+      opened_at: p.entry_time,
+      closed_at: p.exit_time,
+      entry_price: p.entry_price ? Number(p.entry_price) : null,
+      exit_price: p.exit_price ? Number(p.exit_price) : null,
+      size: p.size ? Number(p.size) : null,
+      pnl_amount: p.realized_pnl ? Number(p.realized_pnl) : null,
+      result: p.realized_pnl
+        ? Number(p.realized_pnl) > 0
+          ? "win"
+          : "loss"
+        : null,
+      cycle_state: p.state,
+    }));
+  } catch {
+    return [];
+  }
+}
+
 export default async function HomePage() {
-  const stats = await getStats();
+  const [stats, trades] = await Promise.all([getStats(), getTrades()]);
 
   const fallback: PublicStats = {
     id: "",
@@ -92,7 +132,7 @@ export default async function HomePage() {
         </div>
       </header>
 
-      {/* Hero text */}
+      {/* Hero */}
       <div className="relative z-10 px-6 pt-12 pb-8 text-center animate-fadeIn">
         <p className="section-label mb-3">Live Performance Dashboard</p>
         <h1
@@ -107,8 +147,8 @@ export default async function HomePage() {
         </p>
       </div>
 
-      {/* Cards */}
-      <div className="relative z-10 flex-1 px-4 sm:px-6 pb-12">
+      {/* Top 3 cards */}
+      <div className="relative z-10 px-4 sm:px-6 pb-6">
         <div className="max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-4">
           <BrokerCard brokerName={s.broker_name} isLive={s.is_live} />
           <CapitalCard
@@ -127,14 +167,21 @@ export default async function HomePage() {
         </div>
       </div>
 
+      {/* Trade History card — full width below */}
+      <div className="relative z-10 px-4 sm:px-6 pb-12">
+        <div className="max-w-5xl mx-auto">
+          <TradeHistory trades={trades} />
+        </div>
+      </div>
+
       {/* Footer */}
       <footer
-        className="relative z-10 px-6 py-5 text-center"
+        className="relative z-10 px-6 py-5 text-center mt-auto"
         style={{ borderTop: "1px solid #1e1e2e" }}
       >
         <p className="section-label">
-          Data refreshes every 60 seconds &nbsp;|&nbsp; Powered by Coinbase Advanced
-          &nbsp;|&nbsp; No financial advice
+          Data refreshes every 60 seconds &nbsp;|&nbsp; Powered by Coinbase
+          Advanced &nbsp;|&nbsp; No financial advice
         </p>
       </footer>
     </main>
