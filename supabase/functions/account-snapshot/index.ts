@@ -161,7 +161,7 @@ Deno.serve(async (req) => {
       .limit(1)
       .single();
 
-    const startingBalance = firstSnapshot?.starting_balance ?? 100.0;
+    const startingBalance = firstSnapshot?.starting_balance ?? 50.01;
     const realizedPnl = totalEquity - startingBalance;
 
     await supabase.from("account_snapshots").insert({
